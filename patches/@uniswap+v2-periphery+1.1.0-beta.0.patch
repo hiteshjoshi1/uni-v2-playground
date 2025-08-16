@@ -1,0 +1,13 @@
+diff --git a/node_modules/@uniswap/v2-periphery/contracts/libraries/UniswapV2Library.sol b/node_modules/@uniswap/v2-periphery/contracts/libraries/UniswapV2Library.sol
+index 107fb2e..3281ab1 100644
+--- a/node_modules/@uniswap/v2-periphery/contracts/libraries/UniswapV2Library.sol
++++ b/node_modules/@uniswap/v2-periphery/contracts/libraries/UniswapV2Library.sol
+@@ -21,7 +21,7 @@ library UniswapV2Library {
+                 hex'ff',
+                 factory,
+                 keccak256(abi.encodePacked(token0, token1)),
+-                hex'96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f' // init code hash
++                hex'e699c2c70a1e9ca16c58b40782745b5d609738b755845b6ee18a18d21352f753' // init code hash
+             ))));
+     }
+ 

@@ -1,3 +1,4 @@
+
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { Contract, ContractTransactionResponse, Signer } from "ethers";
@@ -111,45 +112,39 @@ describe("Uniswao v2 tests", function () {
 
         // it("Should add liquidity directly to pair", async function () {
         //     const { owner, user1, wethAddress, usdcAddress, weth, usdc, wethUsdcPair } = await loadFixture(deployFixtures);
-            
+
         //     const wethAmount = ethers.parseEther("1");
         //     const usdcAmount = ethers.parseEther("2000");
-            
+
         //     // Transfer tokens directly to pair
         //     await weth.connect(user1).transfer(await wethUsdcPair.getAddress(), wethAmount);
         //     await usdc.connect(user1).transfer(await wethUsdcPair.getAddress(), usdcAmount);
-            
+
         //     // Call mint directly
         //     const tx = await wethUsdcPair.connect(user1).mint(user1.address);
         //     await tx.wait();
-            
+
         //     console.log("Direct pair mint successful");
         //     const lpBalance = await wethUsdcPair.balanceOf(user1.address);
         //     expect(lpBalance).to.be.gt(0);
         // });
 
         // user 1 is adding liquidity to the pool
-        
 
-
-        it("Should add liquidity to WETH/USDC pair", async function () {
-            const { owner, user1, wethAddress, usdcAddress, weth, usdc, factory, router, wethUsdcPair } = await loadFixture(deployFixtures);
-          
-            const wethAmount = ethers.parseEther("1");
-            const usdcAmount = ethers.parseEther("2000");
-            const now = (await ethers.provider.getBlock("latest"))!.timestamp;
-            const deadline = BigInt(now + 60 * 60);
-          
-            // Verify balances and allowances
-            expect(await weth.balanceOf(user1.address)).to.be.equal(ethers.parseEther("50"));
-            expect(await usdc.balanceOf(user1.address)).to.be.equal(ethers.parseEther("100000"));
-            expect(await weth.allowance(user1.address, await router.getAddress())).to.be.equal(ethers.MaxUint256);
-            expect(await usdc.allowance(user1.address, await router.getAddress())).to.be.equal(ethers.MaxUint256);
-          
-            // Compute and verify pair address
-            const UniswapV2Pair = await ethers.getContractFactory("UniswapV2Pair");
-            const initCodeHash = ethers.keccak256(UniswapV2Pair.bytecode);
+   
+        it("Should verify UniswapV2Pair init code hash", async function () {
+            const { factory, wethAddress, usdcAddress } = await loadFixture(deployFixtures);
+            const UniswapV2Pair = await ethers.getContractFactory("@uniswap/v2-core/contracts/UniswapV2Pair.sol:UniswapV2Pair");
+            let bytecode = UniswapV2Pair.bytecode;
+            // Strip CBOR metadata (e.g., 0xa264...)
+            const cborStart = bytecode.indexOf("a264");
+            if (cborStart !== -1) {
+              bytecode = bytecode.slice(0, cborStart);
+            }
+            const initCodeHash = ethers.keccak256(bytecode);
             console.log("UniswapV2Pair init code hash:", initCodeHash);
+            expect(initCodeHash).to.equal("0xe699c2c70a1e9ca16c58b40782745b5d609738b755845b6ee18a18d21352f753");
+      
             const factoryAddress = await factory.getAddress();
             const [token0, token1] = wethAddress < usdcAddress ? [wethAddress, usdcAddress] : [usdcAddress, wethAddress];
             const computedPairAddress = ethers.getCreate2Address(
@@ -161,17 +156,34 @@ describe("Uniswao v2 tests", function () {
             console.log("Computed pair address:", computedPairAddress);
             console.log("Actual pair address:", actualPairAddress);
             expect(computedPairAddress.toLowerCase()).to.equal(actualPairAddress.toLowerCase());
+          });
+
+
+          it("Should add liquidity to WETH/USDC pair", async function () {
+            const { owner, user1, wethAddress, usdcAddress, weth, usdc, factory, router, wethUsdcPair } = await loadFixture(deployFixtures);
+          
+            const wethAmount = ethers.parseEther("1");
+            const usdcAmount = ethers.parseEther("2000");
+            const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+            const deadline = BigInt(now + 60 * 60);
+          
+            // Verify balances and allowances
+            expect(await weth.balanceOf(user1.address)).to.be.equal(ethers.parseEther("50")); // Note: 50, not 49, since no direct mint yet
+            expect(await usdc.balanceOf(user1.address)).to.be.equal(ethers.parseEther("100000"));
+            expect(await weth.allowance(user1.address, await router.getAddress())).to.be.equal(ethers.MaxUint256);
+            expect(await usdc.allowance(user1.address, await router.getAddress())).to.be.equal(ethers.MaxUint256);
           
             // Debug info
             console.log("=== DEBUG INFO ===");
             console.log("WETH address:", wethAddress);
             console.log("USDC address:", usdcAddress);
-            console.log("Pair address:", actualPairAddress);
-            const pairCode = await ethers.provider.getCode(actualPairAddress);
+            console.log("Pair address:", await factory.getPair(wethAddress, usdcAddress));
+            const pairAddr = await factory.getPair(wethAddress, usdcAddress);
+            const pairCode = await ethers.provider.getCode(pairAddr);
             console.log("Pair has code:", pairCode !== "0x");
             console.log("Pair code length:", pairCode.length);
           
-            const pairContract = await ethers.getContractAt("UniswapV2Pair", actualPairAddress);
+            const pairContract = await ethers.getContractAt("UniswapV2Pair", pairAddr);
             try {
               const token0 = await pairContract.token0();
               const token1 = await pairContract.token1();
@@ -181,50 +193,27 @@ describe("Uniswao v2 tests", function () {
               console.log("Failed to get pair tokens:", e.message);
             }
             console.log("Router factory:", await router.factory());
-            console.log("Factory address:", factoryAddress);
+            console.log("Factory address:", await factory.getAddress());
             console.log("Router WETH:", await router.WETH());
             console.log("WETH address:", wethAddress);
             console.log("Router WETH === our WETH:", (await router.WETH()) === wethAddress);
             console.log("ETH balance:", ethers.formatEther(await ethers.provider.getBalance(user1.address)));
-            console.log("Pair reserves before:", await pairContract.getReserves());
             console.log("=================");
-          
-            // Simulate the call
-            const encodedData = router.interface.encodeFunctionData("addLiquidityETH", [
-              usdcAddress, usdcAmount, 0, 0, user1.address, deadline,
-            ]);
-            try {
-              await ethers.provider.call({
-                to: await router.getAddress(),
-                data: encodedData,
-                value: wethAmount,
-              });
-              console.log("Static call succeeded");
-            } catch (error: any) {
-              console.log("Static call error:", error);
-              if (error.data && error.data.startsWith("0x08c379a0")) {
-                const reason = ethers.AbiCoder.defaultAbiCoder().decode(["string"], "0x" + error.data.slice(10));
-                console.log("Static call revert reason:", reason[0]);
-              } else {
-                console.log("Static call raw error data:", error.data);
-              }
-              throw error;
-            }
           
             // Attempt addLiquidityETH
             try {
               const tx = await router.connect(user1).addLiquidityETH(
                 usdcAddress, // ERC20 token (USDC)
                 usdcAmount, // amountTokenDesired
-                0, // amountTokenMin
-                0, // amountETHMin
+                0, // amountTokenMin (relax for testing)
+                0, // amountETHMin (relax for testing)
                 user1.address,
                 deadline,
                 { value: wethAmount, gasLimit: 5000000 }
               );
-              console.log("Transaction data:", tx.data);
-              const receipt = await tx.wait();
-              console.log("addLiquidityETH successful, gas used:", receipt.gasUsed.toString());
+              console.log("Transaction data:", tx.data); // Log calldata
+              await tx.wait();
+              console.log("addLiquidityETH successful");
             } catch (error: any) {
               console.log("Error code:", error.code);
               console.log("Error message:", error.message);
@@ -248,7 +237,8 @@ describe("Uniswao v2 tests", function () {
           
             const lpBalance = await wethUsdcPair.balanceOf(user1.address);
             expect(lpBalance).to.be.gt(0); // Received LP tokens
-          });
+          });   
+  
 
         
 
