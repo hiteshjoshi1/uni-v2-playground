@@ -3,7 +3,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
-describe("Uniswao v2 tests", function () {
+describe("Uniswap v2 tests", function () {
 
 
     async function deployFixtures() {
@@ -81,10 +81,13 @@ describe("Uniswao v2 tests", function () {
         const tx9 = await usdc.transfer(user2.address, ethers.parseEther("50000"));
         await tx9.wait();
 
+        // const tx10 = await weth.connect(user2).deposit({ value: ethers.parseEther("5") });
+        // await tx10.wait();
+
         return { owner, user1, user2, weth, usdc, dai, wethAddress, usdcAddress, daiAddress, factory, router, wethUsdcPair, usdcDaiPair, routerAddr };
     };
 
-    describe("Uni V2 Integration", function () {
+    describe("Uni V2 liqudity tests", function () {
         it("Should deploy all contracts", async function () {
             const { owner, weth, usdc, dai, factory, router } = await loadFixture(deployFixtures);
             expect(await weth.symbol()).to.equal("WETH");
@@ -195,8 +198,8 @@ describe("Uniswao v2 tests", function () {
                 throw error;
             }
             const reservesFinal = await wethUsdcPair.getReserves();
-            expect(reservesFinal[0]).to.be.equal(ethers.parseEther("1")); // USDC reserves
-            expect(reservesFinal[1]).to.be.equal(ethers.parseEther("2000")); // WETH reserves
+            expect(reservesFinal[0]).to.be.equal(ethers.parseEther("1")); // ETH reserves
+            expect(reservesFinal[1]).to.be.equal(ethers.parseEther("2000")); // USDC reserves
             const lpBalance = await wethUsdcPair.balanceOf(user1.address);
             expect(lpBalance).to.be.gt(0); // Received LP tokens
         });
@@ -256,18 +259,15 @@ describe("Uniswao v2 tests", function () {
             const lpBalance = await usdcDaiPair.balanceOf(user1.address);
             expect(lpBalance).to.be.gt(0); // Received LP tokens
         });
+    });
 
-
-
-
-
+    describe("UNI V2 operation", function () {
         it("swap USDC/ DAI using a third user", async function () {
             const { usdc, dai, router, usdcDaiPair, user1, user2, usdcAddress,daiAddress,routerAddr } = await loadFixture(deployFixtures);
 
             const now = (await ethers.provider.getBlock("latest"))!.timestamp;
             const deadline = BigInt(now + 60 * 60);
             
-
             // add liquidity USDC/DAI
             
             const usdcAmount = ethers.parseEther("20000");
@@ -332,6 +332,95 @@ describe("Uniswao v2 tests", function () {
             expect(bAfter).to.be.gt(bBefore);
         });
 
+        
+        it("swap USDC for weth using a third user", async function () {
+            const { usdc, weth, router, wethUsdcPair, user1, user2, usdcAddress,wethAddress,routerAddr } = await loadFixture(deployFixtures);
+
+            const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+            const deadline = BigInt(now + 60 * 60);
+            
+            // add liquidity USDC/weth
+            // this is the amount the user1 will add to the pool
+            const usdcAmount = ethers.parseEther("44590");
+            const wethAmount = ethers.parseEther("10");
+
+            // check his overall balance
+            expect(await weth.balanceOf(user1.address)).to.be.equal(ethers.parseEther("50"));
+            expect(await usdc.balanceOf(user1.address)).to.be.equal(ethers.parseEther("100000"));
+
+            
+
+            // 1ETH = 4459, so he is adding 10 ETH and  44590 USDC
+            const tx = await router.connect(user1).addLiquidityETH(
+                usdcAddress, // ERC20 token (USDC)
+                usdcAmount, // amountTokenDesired
+                0, // amountTokenMin (relax for testing)
+                0, // amountETHMin (relax for testing)
+                user1.address,
+                deadline,
+                { value: wethAmount, gasLimit: 5000000 }
+            );// Log calldata
+            await tx.wait();
+
+            // verify pair exists and reserves are non-zero
+            const reservesFinal = await wethUsdcPair.getReserves();
+            expect(reservesFinal[0]).to.be.equal(ethers.parseEther("10")); // ETH
+            expect(reservesFinal[1]).to.be.equal(ethers.parseEther("44590")); //USDC
+            const lpBalance = await wethUsdcPair.balanceOf(user1.address);
+
+            const [r0, r1] = await wethUsdcPair.getReserves();
+            expect(r0 + r1).to.be.gt(0n);
+
+           // liquidity is added now other users can swap 
+           // check existing user2 balance
+           expect(await usdc.balanceOf(user2.address)).to.be.equal(ethers.parseEther("50000"));
+
+            // approve router for user2
+            const usdcAmountToSwap = ethers.parseUnits("4459", 18);
+            //  give approval to router
+            const tx1 = await usdc.connect(user2).approve(routerAddr, usdcAmountToSwap);  
+            await tx1.wait();  
+            
+        
+            // setup path
+            // When swapping, the router (UniswapV2Router02) handles the mapping automatically based on the path array you provide 
+            // (input token first, output token last).
+            const path = [usdcAddress, wethAddress];
+
+            // get the expected amount out from router
+            // this is calculated based on xy = k
+            const amountsOut = await router.getAmountsOut(usdcAmountToSwap, path);
+            const amountOutMin = (amountsOut[1] * 99n) / 100n; // 1% slippage
+            // amountOut[1] is calculated Weth balance
+            const expectedOut = amountsOut[1];
+
+            const aBefore = await usdc.balanceOf(user2.address);
+            const ethBalanceInit = await ethers.provider.getBalance(user2.address);
+
+            
+            
+            // we have exact tokens that we need to swap
+            const tx2  = await (await router.connect(user2).swapExactTokensForETH(
+                usdcAmountToSwap,
+                amountOutMin,
+                path,
+                user2.address, 
+                deadline
+            ));
+            await tx2.wait();
+
+
+            const aAfter = await usdc.balanceOf(user2.address);
+            const ethBalAfter = await ethers.provider.getBalance(user2.address);
+            
+            expect(await usdc.balanceOf(user2.address)).to.be.equal(ethers.parseEther("45541"));
+            
+
+            expect(aAfter).to.equal(aBefore - usdcAmountToSwap);
+            expect(ethBalAfter - ethBalanceInit).to.be.greaterThanOrEqual(amountOutMin);
+            
+            
+        });
 
     });
 
