@@ -1,4 +1,4 @@
-# Core Idea of Uniswap V2
+# Core Idea of Uniswap V2 - constant product AMM
 Uniswap V2 is a decentralized exchange protocol that implements an automated market maker (AMM) model using a constant product market maker (CPMM) formula. The fundamental idea is to create permissionless, decentralized liquidity pools for token pairs (e.g., ETH/USDC) where anyone can provide liquidity or trade without relying on traditional order books or centralized intermediaries. Instead of matching buyers and sellers, the pool uses a mathematical invariant to determine prices and execute trades automatically.
 The key invariant is x * y = k, where:
 
@@ -13,20 +13,24 @@ Arbitrageurs can then trade against external market prices to "rebalance" the po
 
 ## Swap and math intuition
 
-1. xy >= k, This invariant is maintained
+1. xy = k, This invariant is maintained
 2. Example, token0 = 1 and token1 = 1000
 Effectively, the liquidity provider is saying 1 token0 = 1000 token1
 so x = 1, y 1000 and k = 1000
 
-## Swap 0.5 token0 in for token1 
+### Swap 0.5 token0 in for token1 
 3. Now let's say a user wants to Swap 0.5 token0 in for token1
 Effective balance to swap = 0.5 * 0.997 ≈ 0.4985 (0.3% goes to fees)
 Now, we need to figure out how much 0.4985 token0 is equal to in token1 and return that to user
 
 4. This is "constant product" AMM, it maintains the product invariant, so
+
 ```(x + Δx) * (y - Δy) = k```
-we want Δy
+
+we want Δy, so
+
 ``` Δy = y - (k / (x + Δx))```
+
   = 1000 - (1000/ (1+ 0.4985)
   = 332.67 
 This is what the user will get 332.67 token1 for his 0.5 token0.
@@ -37,7 +41,7 @@ or 1 token0 = 667.33/1.5 = 444.89 token1
 
 So the price in the pool changed from 1 token0 = 1000 token1 to 1 token0 = 444.89 token1
 
-## Swap 500 token1 in for token0 
+### Swap 500 token1 in for token0 
 
 Effective balance to be swapped = 500*0.997 = 498.5
 
@@ -46,26 +50,20 @@ new reserve1 = 1000+498.5
 ```(x - Δx) * (y + Δy) = k```
 Solving for 
 ```Δx = x - (k/(y + Δy))```
-       = 1 - (1000/ 1000+498.5) 
-       = 0.333 of token0
-user gets 0.333 of token0 
+       = 1 - (1000/ 1000+498.5) = 0.333 of token0
+
+User gets 0.333 of token0 
+
 Pool has New reserves: ~0.667 token0, ~1500 token1 (k≈1000.5)
-so 0.6667 token0  = 1500 token1
+
+So now 0.6667 token0  = 1500 token1
+
 or 1 token0 = 1500/0.667 = 2248.88 token1
 
 Notice that the new price has nothing to do with price discovery, pool is just maintaining the invariant, price discovery is left to arbitrageurs.
 
 
-## Pool rebalancing by arbitrage
-1. Consider case Swap 0.5 token0 in for token1. After this swap, the pool is offering 1 token0 = 444.89 token1
-2. Lets assume that actual going rate in a CEX for token0/token1 pair is 1 token0 = 900 token1
-3. Arbitrage Opportunity: Buy token0 cheap from pool, sell expensive on CEX
-4. buy token0 and sell it in cex 
-
-
-
-Main Implementation 
-1. UniswapV2Pair.sol
+## UniswapV2Pair.sol - main contract that implements a V2 Pair
 - Holds reserves of token0 and token1
 - Swaps between them (constant-product AMM with fees)
 - Issues/burns LP tokens to track liquidity provider shares
@@ -74,80 +72,9 @@ Main Implementation
 - once deployed per pair, it is referenced as IUniswapV2Pair(pair)
 
 
-The update method is the one which maintains the TWAP oracle by tracking the time weighted average price in price0CumulativeLast, price1CumulativeLast and forms the basis of Uniswap oracle
+Let's take a look at a few methods of this contract
 
-```bash
-/*
-balance0 and balance1 are the ERC20 token balance of token0 and token1 held by this contract
-reserve0 and eserve1 are the reserve variables maintained by UniswapV2Pair contract
-*/
-    function _update(uint balance0, uint balance1, uint112 _reserve0, uint112 _reserve1) private {
-        // check the balances are less than the max value that uint112 can attain. uint112(-1) = 2^112 -1
-        require(balance0 <= uint112(-1) && balance1 <= uint112(-1), 'UniswapV2: OVERFLOW');
-
-        // Line 2: Get current block timestamp, modulo 2^32 
-        // why uin32 instead of uint256, block.timestamp is a uint256
-        // uint32  is more gas efficient, we are interested in timeElapsed which will be seconds or minutes, no need to use a bigger data type
-        // uint32 can represent upto 136 years ((2^32 seconds) more than enough for what we need
-        uint32 blockTimestamp = uint32(block.timestamp % 2**32);
-        uint32 timeElapsed = blockTimestamp - blockTimestampLast; // overflow is desired
-
-        //  if time passed and reserves were non zero, accumulate prices
-        // for first time liquidity addition, reserves would be 0, so this block wont run
-        if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
-            // * never overflows, and + overflow is desired
-
-            price0CumulativeLast += uint(UQ112x112.encode(_reserve1).uqdiv(_reserve0)) * timeElapsed;
-            price1CumulativeLast += uint(UQ112x112.encode(_reserve0).uqdiv(_reserve1)) * timeElapsed;
-        }
-        // first time, just set reserves to balances, and blockTimestampLast value
-        reserve0 = uint112(balance0);
-        reserve1 = uint112(balance1);
-        blockTimestampLast = blockTimestamp;
-        emit Sync(reserve0, reserve1);
-    }
-
-```
-
-
-Let's take a look at the mint function
-```bash
-function mint(address to) external lock returns (uint liquidity) {
-        // gets _reserve0, _reserve1 _blockTimestampLast once , this discards the _blockTimestampLast        
-        (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
-        // the stored reserves from the last _update (cached state used for pricing/TWAP).
-        
-
-        // get ERC-20 balances held by the contract
-        uint balance0 = IERC20(token0).balanceOf(address(this));
-        uint balance1 = IERC20(token1).balanceOf(address(this));
-
-        // amount0 and amount1 are the fresh liquidity added for each token pair
-        // The difference (balance - reserve) is what was newly deposited since the last sync.
-        // The fresh liquidity just added of each token:
-        uint amount0 = balance0.sub(_reserve0);
-        uint amount1 = balance1.sub(_reserve1);
-
-        bool feeOn = _mintFee(_reserve0, _reserve1);
-        uint _totalSupply = totalSupply; // gas savings, must be defined here since totalSupply can update in _mintFee
-        if (_totalSupply == 0) {
-            liquidity = Math.sqrt(amount0.mul(amount1)).sub(MINIMUM_LIQUIDITY);
-            // MINIMUM_LIQUIDITY is burned (sent to address(0)) to pin totalSupply > 0, avoiding edge cases (price manipulation/division-by-zero at tiny supply).
-           _mint(address(0), MINIMUM_LIQUIDITY); // permanently lock the first MINIMUM_LIQUIDITY tokens
-        } else {
-            // min(...) enforces the pool ratio: the side that’s short (relative to reserves) is the limiting factor; any excess on the other side doesn’t increase minted LP
-            liquidity = Math.min(amount0.mul(_totalSupply) / _reserve0, amount1.mul(_totalSupply) / _reserve1);
-        }
-        require(liquidity > 0, 'UniswapV2: INSUFFICIENT_LIQUIDITY_MINTED');
-        _mint(to, liquidity);
-        // Syncs stored reserves to the actual balances and updates price accumulators (TWAP) using the elapsed time since last update.
-        _update(balance0, balance1, _reserve0, _reserve1);
-        if (feeOn) kLast = uint(reserve0).mul(reserve1); // reserve0 and reserve1 are up-to-date
-        emit Mint(msg.sender, amount0, amount1);
-    }
-```
-
-Swap function
+### Swap function
 ```bash
 function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
         require(amount0Out > 0 || amount1Out > 0, 'UniswapV2: INSUFFICIENT_OUTPUT_AMOUNT');
@@ -186,21 +113,12 @@ function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data)
         uint balance1Adjusted = balance1.mul(1000).sub(amount1In.mul(3));
         require(balance0Adjusted.mul(balance1Adjusted) >= uint(_reserve0).mul(_reserve1).mul(1000**2), 'UniswapV2: K');
         }
-
-   
-// a note on the lock modifier
-
-    uint private unlocked = 1;
-    modifier lock() {
-        require(unlocked == 1, 'UniswapV2: LOCKED');  // 1. Check if unlocked
-        unlocked = 0;                                  // 2. Lock it
-    _;                                            // 3. Execute function
-        unlocked = 1;                                 // 4. Unlock when done
+        //update the TWAP prices
+         _update(balance0, balance1, _reserve0, _reserve1);
+        emit Swap(msg.sender, amount0In, amount1In, amount0Out, amount1Out, to);
     }
-
 ```
-
-## Swap end to end
+### How Swap works
 1. Initial state of the pool
 100 ETH, 200k USDC reserves
 2. User wants to swap 1 ETH to USDC 
@@ -246,7 +164,7 @@ balance1Adjusted = 198,025.68 - 0  = 198,025.68 USDC
 New K = 100.997 × 198025.68 = ~20,0000 (Loop invariant holds)
 
 
-## Flash Loan
+### Arbitrage: Flash Loans with swap
 
 1. World State
 - Uniswap: 1 ETH = 2,000 USDC
@@ -289,21 +207,105 @@ contract FlashArbitrage {
 ```
 
 Other use cases
--  Liquidation both 
-// 1. Flash borrow ETH from Uniswap
-// 2. Liquidate undercollateralized loan on Aave
-// 3. Get liquidation bonus in USDC  
-// 4. Swap USDC back to ETH
-// 5. Repay flash loan + keep profit
+1. Liquidate undercollateralized loan on Aave
+2. Arbitrage using Flash Loan
+
+
+
+## Update function
+The update method is the one which maintains the TWAP oracle by tracking the time weighted average price in price0CumulativeLast, price1CumulativeLast and forms the basis of Uniswap oracle
+
+```bash
+/*
+balance0 and balance1 are the ERC20 token balance of token0 and token1 held by this contract
+reserve0 and eserve1 are the reserve variables maintained by UniswapV2Pair contract
+*/
+    function _update(uint balance0, uint balance1, uint112 _reserve0, uint112 _reserve1) private {
+        // check the balances are less than the max value that uint112 can attain. uint112(-1) = 2^112 -1
+        require(balance0 <= uint112(-1) && balance1 <= uint112(-1), 'UniswapV2: OVERFLOW');
+
+        // Line 2: Get current block timestamp, modulo 2^32 
+        // why uin32 instead of uint256, block.timestamp is a uint256
+        // uint32  is more gas efficient, we are interested in timeElapsed which will be seconds or minutes, no need to use a bigger data type
+        // uint32 can represent upto 136 years ((2^32 seconds) more than enough for what we need
+        uint32 blockTimestamp = uint32(block.timestamp % 2**32);
+        uint32 timeElapsed = blockTimestamp - blockTimestampLast; // overflow is desired
+
+        //  if time passed and reserves were non zero, accumulate prices
+        // for first time liquidity addition, reserves would be 0, so this block wont run
+        if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
+            // * never overflows, and + overflow is desired
+
+            price0CumulativeLast += uint(UQ112x112.encode(_reserve1).uqdiv(_reserve0)) * timeElapsed;
+            price1CumulativeLast += uint(UQ112x112.encode(_reserve0).uqdiv(_reserve1)) * timeElapsed;
+        }
+        // first time, just set reserves to balances, and blockTimestampLast value
+        reserve0 = uint112(balance0);
+        reserve1 = uint112(balance1);
+        blockTimestampLast = blockTimestamp;
+        emit Sync(reserve0, reserve1);
+    }
+
+```
+
+
+### mint function
+```bash
+function mint(address to) external lock returns (uint liquidity) {
+        // gets _reserve0, _reserve1 _blockTimestampLast once , this discards the _blockTimestampLast        
+        (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
+        // the stored reserves from the last _update (cached state used for pricing/TWAP).
+        
+
+        // get ERC-20 balances held by the contract
+        uint balance0 = IERC20(token0).balanceOf(address(this));
+        uint balance1 = IERC20(token1).balanceOf(address(this));
+
+        // amount0 and amount1 are the fresh liquidity added for each token pair
+        // The difference (balance - reserve) is what was newly deposited since the last sync.
+        // The fresh liquidity just added of each token:
+        uint amount0 = balance0.sub(_reserve0);
+        uint amount1 = balance1.sub(_reserve1);
+
+        bool feeOn = _mintFee(_reserve0, _reserve1);
+        uint _totalSupply = totalSupply; // gas savings, must be defined here since totalSupply can update in _mintFee
+        if (_totalSupply == 0) {
+            liquidity = Math.sqrt(amount0.mul(amount1)).sub(MINIMUM_LIQUIDITY);
+            // MINIMUM_LIQUIDITY is burned (sent to address(0)) to pin totalSupply > 0, avoiding edge cases (price manipulation/division-by-zero at tiny supply).
+           _mint(address(0), MINIMUM_LIQUIDITY); // permanently lock the first MINIMUM_LIQUIDITY tokens
+        } else {
+            // min(...) enforces the pool ratio: the side that’s short (relative to reserves) is the limiting factor; any excess on the other side doesn’t increase minted LP
+            liquidity = Math.min(amount0.mul(_totalSupply) / _reserve0, amount1.mul(_totalSupply) / _reserve1);
+        }
+        require(liquidity > 0, 'UniswapV2: INSUFFICIENT_LIQUIDITY_MINTED');
+        _mint(to, liquidity);
+        // Syncs stored reserves to the actual balances and updates price accumulators (TWAP) using the elapsed time since last update.
+        _update(balance0, balance1, _reserve0, _reserve1);
+        if (feeOn) kLast = uint(reserve0).mul(reserve1); // reserve0 and reserve1 are up-to-date
+        emit Mint(msg.sender, amount0, amount1);
+    }
+```
+   
+// a note on the lock modifier
+```bash
+    uint private unlocked = 1;
+    modifier lock() {
+        require(unlocked == 1, 'UniswapV2: LOCKED');  // 1. Check if unlocked
+        unlocked = 0;                                  // 2. Lock it
+    _;                                            // 3. Execute function
+        unlocked = 1;                                 // 4. Unlock when done
+    }
+
+```
 
 
 
 
+## UniswapV2Factory.sol : instantiates and interacts with UniswapV2Pair.sol
 
-2. UniswapV2Factory.sol
 - Implements interface IUniswapV2Factory which has createPair(), getPair(), allPairs(), setFeeTo, setFeeToSetter
  
- Let's dive into the most important function, comments are mine
+ This is how a pair is created, These are all helper methods to instantiate and work with pair contract
 
  ```bash
      function createPair(address tokenA, address tokenB) external returns (address pair) {
