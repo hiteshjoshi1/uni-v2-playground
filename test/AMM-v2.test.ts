@@ -105,8 +105,8 @@ describe("Uniswap v2 tests", function () {
         });
 
         // you can add liquidiy directly by calling mint, not ideal but can be done 
-        it("Should add liquidity directly to pair", async function () {
-            const { owner, user1, wethAddress, usdcAddress, weth, usdc, wethUsdcPair } = await loadFixture(deployFixtures);
+        it("Should add liquidity directly to usdc/eth pair", async function () {
+            const {  user1, weth, usdc, wethUsdcPair } = await loadFixture(deployFixtures);
 
             const wethAmount = ethers.parseEther("1");
             const usdcAmount = ethers.parseEther("2000");
@@ -153,7 +153,7 @@ describe("Uniswap v2 tests", function () {
 
         // this uses addLiquidityETH vs addLiquidity for usdc- dai pair
         it("Should add liquidity to WETH/USDC pair", async function () {
-            const { user1, usdcAddress, weth, usdc, router, wethUsdcPair } = await loadFixture(deployFixtures);
+            const { user1, usdcAddress, weth, usdc, router, wethUsdcPair, wethAddress } = await loadFixture(deployFixtures);
 
             const wethAmount = ethers.parseEther("1");
             const usdcAmount = ethers.parseEther("2000");
@@ -197,9 +197,12 @@ describe("Uniswap v2 tests", function () {
                 }
                 throw error;
             }
-            const reservesFinal = await wethUsdcPair.getReserves();
-            expect(reservesFinal[0]).to.be.equal(ethers.parseEther("1")); // ETH reserves
-            expect(reservesFinal[1]).to.be.equal(ethers.parseEther("2000")); // USDC reserves
+            // as new deployment in a test could change the order of tokens
+            const [r0, r1] = await wethUsdcPair.getReserves();
+            const t0 = await wethUsdcPair.token0();
+            expect(r0).to.equal(t0 === wethAddress ? wethAmount : usdcAmount);
+            expect(r1).to.equal(t0 === wethAddress ? usdcAmount : wethAmount);
+
             const lpBalance = await wethUsdcPair.balanceOf(user1.address);
             expect(lpBalance).to.be.gt(0); // Received LP tokens
         });
@@ -223,7 +226,8 @@ describe("Uniswap v2 tests", function () {
 
             // the order matters 
             const reservesInitial = await usdcDaiPair.getReserves();
-            expect(reservesInitial[0]).to.be.equal(ethers.parseEther("0")); // USDC reserves
+            // both are zero, so does not matter which one is which
+            expect(reservesInitial[0]).to.be.equal(ethers.parseEther("0")); 
             expect(reservesInitial[1]).to.be.equal(ethers.parseEther("0"));
             try {
                 const tx = await router.connect(user1).addLiquidity(
@@ -253,9 +257,12 @@ describe("Uniswap v2 tests", function () {
                 }
                 throw error;
             }
-            const reservesFinal = await usdcDaiPair.getReserves();
-            expect(reservesFinal[0]).to.be.equal(ethers.parseEther("2000")); // USDC reserves
-            expect(reservesFinal[1]).to.be.equal(ethers.parseEther("2000")); // WETH reserves
+            // order could be anything in a new deployment
+            const [r0, r1] = await usdcDaiPair.getReserves();
+            const t0 = await usdcDaiPair.token0();
+            expect(r0).to.equal(t0 === usdcAddress ? usdcAmount : daiAmount);
+            expect(r1).to.equal(t0 === usdcAddress ? daiAmount : usdcAmount);
+            
             const lpBalance = await usdcDaiPair.balanceOf(user1.address);
             expect(lpBalance).to.be.gt(0); // Received LP tokens
         });
@@ -362,14 +369,15 @@ describe("Uniswap v2 tests", function () {
             );// Log calldata
             await tx.wait();
 
-            // verify pair exists and reserves are non-zero
-            const reservesFinal = await wethUsdcPair.getReserves();
-            expect(reservesFinal[0]).to.be.equal(ethers.parseEther("10")); // ETH
-            expect(reservesFinal[1]).to.be.equal(ethers.parseEther("44590")); //USDC
+                
+
             const lpBalance = await wethUsdcPair.balanceOf(user1.address);
 
             const [r0, r1] = await wethUsdcPair.getReserves();
             expect(r0 + r1).to.be.gt(0n);
+            const t0 = await wethUsdcPair.token0();
+            expect(r0).to.equal(t0 === wethAddress ? wethAmount : usdcAmount);
+            expect(r1).to.equal(t0 === wethAddress ? usdcAmount : wethAmount);
 
            // liquidity is added now other users can swap 
            // check existing user2 balance

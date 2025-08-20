@@ -75,7 +75,7 @@ Notice that the new price has nothing to do with price discovery, pool is just m
 Let's take a look at a few methods of this contract
 
 ### Swap function
-```bash
+```solidity
 function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
         require(amount0Out > 0 || amount1Out > 0, 'UniswapV2: INSUFFICIENT_OUTPUT_AMOUNT');
         (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
@@ -178,7 +178,7 @@ pair.swap(1e18, 0, address(this), "arbitrage");
 You owe: ~2,006 USDC (2,000 + 0.3% fee)
 
 4. As the swap allows calling your fallback, you can arb your heart out
-```bash
+```solidity
 contract FlashArbitrage {
     function executeArbitrage() external {
         // Flash swap 1 ETH from Uniswap
@@ -215,7 +215,7 @@ Other use cases
 ## Update function
 The update method is the one which maintains the TWAP oracle by tracking the time weighted average price in price0CumulativeLast, price1CumulativeLast and forms the basis of Uniswap oracle
 
-```bash
+```solidity
 /*
 balance0 and balance1 are the ERC20 token balance of token0 and token1 held by this contract
 reserve0 and eserve1 are the reserve variables maintained by UniswapV2Pair contract
@@ -250,7 +250,7 @@ reserve0 and eserve1 are the reserve variables maintained by UniswapV2Pair contr
 
 
 ### mint function
-```bash
+```solidity
 function mint(address to) external lock returns (uint liquidity) {
         // gets _reserve0, _reserve1 _blockTimestampLast once , this discards the _blockTimestampLast        
         (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
@@ -287,7 +287,7 @@ function mint(address to) external lock returns (uint liquidity) {
 ```
    
 // a note on the lock modifier
-```bash
+```solidity
     uint private unlocked = 1;
     modifier lock() {
         require(unlocked == 1, 'UniswapV2: LOCKED');  // 1. Check if unlocked
@@ -307,7 +307,7 @@ function mint(address to) external lock returns (uint liquidity) {
  
  This is how a pair is created, These are all helper methods to instantiate and work with pair contract
 
- ```bash
+ ```solidity
      function createPair(address tokenA, address tokenB) external returns (address pair) {
         require(tokenA != tokenB, 'UniswapV2: IDENTICAL_ADDRESSES');
         //compare the addresses and ensure that only 1 pair is created for a set of 2 tokens. Example (usdc/weth) always deploys one pair
@@ -345,5 +345,54 @@ function mint(address to) external lock returns (uint liquidity) {
         emit PairCreated(token0, token1, pair, allPairs.length);
     }
  ```
+
+# Time weighted Average price intuition
+
+Attack scenario:
+
+1. Flash loan 1M tokens
+2. Dump into pool → price crashes
+3. Oracle reads crashed price
+4. Use crashed price to liquidate positions
+5. Profit from manipulation
+
+Solution is Time weighted average price - which is difficult to manipulate 
+
+uint avgPrice = (price1*time1 + price2*time2 + ...) / totalTime
+<b>Why time weighting works:</b>
+
+- Expensive to manipulate: Must maintain fake price for extended periods
+- Cost increases with time: Longer manipulation = more capital locked
+- Natural reversion: Arbitrageurs restore fair prices quickly
+
+
+## UniswapV2OracleLibrary.sol
+- Helper to get Oracle prices
+```solidity
+    function currentCumulativePrices(
+        address pair
+    ) internal view returns (uint price0Cumulative, uint price1Cumulative, uint32 blockTimestamp) {
+        // get timestanp in unit32
+        blockTimestamp = currentBlockTimestamp();
+        // get prices stored in  the pair
+        price0Cumulative = IUniswapV2Pair(pair).price0CumulativeLast();
+        price1Cumulative = IUniswapV2Pair(pair).price1CumulativeLast();
+        
+        // if time has elapsed since the last update on the pair, mock the accumulated price values
+        (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast) = IUniswapV2Pair(pair).getReserves();
+        if (blockTimestampLast != blockTimestamp) {
+            // subtraction overflow is desired
+            uint32 timeElapsed = blockTimestamp - blockTimestampLast;
+            // addition overflow is desired
+            // counterfactual
+            // accumulate the price (price *time) for the time spent since last accumulation. The proice might not change but time has passed
+
+            price0Cumulative += uint(FixedPoint.fraction(reserve1, reserve0)._x) * timeElapsed;
+            // counterfactual
+            price1Cumulative += uint(FixedPoint.fraction(reserve0, reserve1)._x) * timeElapsed;
+        }
+    }
+}
+```
 
 

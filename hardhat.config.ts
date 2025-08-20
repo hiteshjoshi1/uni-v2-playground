@@ -1,3 +1,4 @@
+import "hardhat-abi-exporter";   
 import type { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 
@@ -38,15 +39,27 @@ const config: HardhatUserConfig = {
       },
     ],
   },
-  defaultNetwork: "hardhat",
+  defaultNetwork: "anvil",
   networks: {
-    hardhat: {
-      allowUnlimitedContractSize: true, // For Uniswap contracts
-    },
     anvil: {
       url: "http://127.0.0.1:8545",
     },
   },
+  abiExporter: {
+    path: "export/abi",
+    runOnCompile: true,
+    clear: true,
+    flat: true,
+    spacing: 2,
+    only: [
+      "UniswapV2Factory",
+      "UniswapV2Router02",
+      "UniswapV2Pair",
+      "UniswapV2ERC20",
+      "WETH9",
+      "MockERC20"
+    ]
+  }
 };
 
 export default config;
