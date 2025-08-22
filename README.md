@@ -83,8 +83,15 @@ If you want to use local hardhat node instead of anvil, if not SKIP
 ```npx hardhat ignition deploy ignition/modules/UniV2.ts --network anvil```
 
 
-### Take the deployed contracts address for frontend
-```npx hardhat run scripts/export-addresses.ts --network anvil```
+
+
+## Publish the contracts to npm for consumption by UI
+
+npm run build:artifacts
+npm pack          # sanity check tarball contents
+npm publish --access public --ignore-scripts
 
 
 
+To Update version
+npm version patch (minor/major)

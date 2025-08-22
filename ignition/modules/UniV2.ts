@@ -16,5 +16,12 @@ export default buildModule("UniV2", (m) => {
   const usdc = m.contract("MockERC20", ["USDC", "USDC",  usdcInitial, deployer], { id: "USDC", from: deployer });
 
   const router = m.contract("UniswapV2Router02", [factory, weth], { id: "Router02", from: deployer });
+
+  
+  m.call(factory, "createPair", [weth, usdc], { id: "CreateWethUsdc" });
+  m.call(factory, "createPair", [weth, dai], { id: "CreateWethDAI" });
+  m.call(factory, "createPair", [usdc, dai], { id: "CreatehUsdcDAI" });
+
+
   return { factory, weth, dai, usdc, router };
 });

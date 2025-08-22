@@ -1,5 +1,5 @@
 {
-  "name": "amm-learn",
+  "name": "@0xheyjo/uni-v2-artifacts",
   "version": "1.0.0",
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",
@@ -28,5 +28,33 @@
   "dependencies": {
     "@uniswap/v2-core": "^1.0.1",
     "@uniswap/v2-periphery": "^1.1.0-beta.0"
+  },
+  "files": [
+    "export/abi",
+    "export/frontend"
+  ],
+  "exports": {
+    ".": "./package.json",
+    "./abi/*": "./export/abi/*",
+    "./addresses/*": "./export/frontend/*"
+  },
+  "sideEffects": false,
+"scripts": {
+    "abi:build": "hardhat compile",
+    "deploy:dev": "npm run abi:build && hardhat ignition deploy ignition/modules/UniV2.ts --network anvil --reset",
+    "export:dev": "npm run abi:build && hardhat run scripts/export-addresses.ts --network anvil",
+    "build:artifacts:dev": "npm run deploy:dev && npm run export:dev",
+
+    "deploy:stage": "npm run abi:build && hardhat ignition deploy ignition/modules/UniV2.ts --network sepolia",
+    "export:stage": "npm run abi:build && hardhat run scripts/export-addresses.ts --network sepolia",
+    "build:artifacts:stage": "npm run export:stage",
+
+    
+    "deploy:prod": "npm run abi:build && hardhat ignition deploy ignition/modules/UniV2.ts --network mainnet",
+    "export:prod": "npm run abi:build && hardhat run scripts/export-addresses.ts --network mainnet",
+
+    
+    "build:artifacts": "npm run build:artifacts:dev",
+    "prepublishOnly": "npm run build:artifacts"
   }
 }

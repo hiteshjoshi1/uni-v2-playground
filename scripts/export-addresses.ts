@@ -1,30 +1,59 @@
 // scripts/export-addresses.ts
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
-import { network } from "hardhat";
+import { ethers, network } from "hardhat";
 
 async function main() {
-    const chainId = parseInt(await network.provider.send("eth_chainId"), 16);
-    const p = path.join(process.cwd(), `ignition/deployments/chain-${chainId}/deployed_addresses.json`);
-    const deployed = JSON.parse(readFileSync(p, "utf8"));
+  const chainId = parseInt(await network.provider.send("eth_chainId"), 16);
 
-    const out = {
-        [chainId]: {
-            UniswapV2Factory: deployed["UniV2#Factory"],
-            UniswapV2Router02: deployed["UniV2#Router02"],
-            WETH9: deployed["UniV2#WETH9"],
-            DAI: deployed["UniV2#DAI"],
-            USDC: deployed["UniV2#USDC"]
-        }
-    };
+  // Load Ignition deployment addresses
+  const deployedPath = path.join(process.cwd(), `ignition/deployments/chain-${chainId}/deployed_addresses.json`);
+  const deployed = JSON.parse(readFileSync(deployedPath, "utf8"));
 
-    const outDir = path.join(process.cwd(), "export", "frontend");
-    mkdirSync(outDir, { recursive: true }); // creates only if missing
+  // Destructure the addresses from the deployment map
+  const {
+    ["UniV2#Factory"]: factoryAddr,
+    ["UniV2#Router02"]: routerAddr,
+    ["UniV2#WETH9"]:   wethAddr,
+    ["UniV2#DAI"]:     daiAddr,
+    ["UniV2#USDC"]:    usdcAddr,
+  } = deployed;
 
-    //out → object to convert to JSON string.
-    //null → no custom replacer (include all properties).
-    //2 → pretty-print with 2-space indentation (human-readable).
-    writeFileSync(path.join(outDir, `addresses.${chainId}.json`), JSON.stringify(out, null, 2));
-    console.log("Wrote export/frontend/addresses.%d.json", chainId);
+  // Load Factory ABI from the abi export (array form)
+  const factoryAbiPath = path.join(process.cwd(), "export", "abi", "UniswapV2Factory.json");
+  const FactoryAbi = JSON.parse(readFileSync(factoryAbiPath, "utf8"));
+
+  // Read pair addresses from chain
+  const factory = new ethers.Contract(factoryAddr, FactoryAbi, ethers.provider);
+  console.log(wethAddr)
+  console.log(usdcAddr)
+  console.log(daiAddr)
+  const pairWethUsdc = await factory.getPair(wethAddr, usdcAddr);
+  const pairWethDai  = await factory.getPair(wethAddr, daiAddr);
+  const pairUsdcDai  = await factory.getPair(usdcAddr, daiAddr);
+
+  // Build output for the frontend artifacts package
+  const out = {
+    [chainId]: {
+      UniswapV2Factory: factoryAddr,
+      UniswapV2Router02: routerAddr,
+      WETH9: wethAddr,
+      DAI: daiAddr,
+      USDC: usdcAddr,
+      WETH_USDC_Pair: pairWethUsdc,
+      WETH_DAI_Pair:  pairWethDai,
+      USDC_DAI_Pair: pairUsdcDai,
+    },
+  };
+
+  const outDir = path.join(process.cwd(), "export", "frontend");
+  mkdirSync(outDir, { recursive: true });
+
+  writeFileSync(path.join(outDir, `addresses.${chainId}.json`), JSON.stringify(out, null, 2));
+  console.log(`Wrote export/frontend/addresses.${chainId}.json`);
 }
-main();
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
